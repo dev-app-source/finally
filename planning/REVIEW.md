@@ -1,15 +1,17 @@
-# Review: Changes Since Last Commit
+﻿# Review: Changes Since Last Commit
+
+Compared `HEAD` (`19d3051`) with its first parent (`5b43955`).
 
 ## Findings
 
-### [P1] The documented Docker quick start cannot build the image
+### [P1] Inline review comments cannot be posted with read-only PR permissions
 
-`README.md:35` tells users to run `docker build -t finally .`, but there is no `Dockerfile` in the repository. A clean checkout therefore cannot build the image, so the documented startup path fails before launch. Add the Docker setup or change the quick start to use an available startup path.
+`.github/workflows/claude-code-review.yml:19-22` grants `pull-requests: read`, while the updated prompt at line 41 asks the review plugin to post inline comments. The plugin's comment tool needs write access, so reviews that find issues cannot publish their inline comments. Grant `pull-requests: write` to this job (and only the permissions otherwise needed).
 
-### [P2] The Docker run command requires a `.env` file described as optional
+### [P1] The allowlist blocks the review plugin's required `gh` commands
 
-`README.md:34-36` describes creating `.env` as optional, then always passes `--env-file .env`. Docker exits if that path does not exist; a clean checkout does not contain a tracked `.env`. Omit `--env-file` when no file is present, or make creating the file an explicit prerequisite with a committed example.
+`.github/workflows/claude-code-review.yml:42` allows only `mcp__github_inline_comment__create_inline_comment`. The configured code-review plugin uses `gh pr view`, `gh pr diff`, `gh issue view`, and related `gh` commands to inspect and check the PR; those tools are not included in this explicit `claude_args` allowlist. The action can start but Claude cannot complete the review. Add the plugin's required `Bash(gh ...)` tools to the allowlist.
 
-## Scope and checks
+## Scope
 
-Reviewed tracked diffs and new files since `HEAD`, including README/planning changes and Claude plugin, hook, and reviewer configuration. Confirmed the repository has no `Dockerfile` or `scripts/` directory and no tracked `.env`. `git diff --check HEAD` reported no whitespace errors.
+Reviewed the two workflow changes in the latest merge commit. No tests were run; this change only modifies GitHub Actions configuration.
