@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from app.market.cache import PriceCache
+from app.market.seed_prices import SEED_PRICES
 from app.market.simulator import SimulatorDataSource
 
 
@@ -135,4 +136,31 @@ class TestSimulatorDataSource:
 
         # Just verify it starts and stops cleanly
         await asyncio.sleep(0.2)
+        await source.stop()
+
+    async def test_is_supported(self):
+        source = SimulatorDataSource(price_cache=PriceCache())
+        assert source.is_supported("AAPL")
+        assert source.is_supported("  pypl ")
+        assert not source.is_supported("APPL")
+        assert not source.is_supported("")
+
+    async def test_unsupported_tickers_ignored(self):
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.1)
+        await source.start(["aapl", "ZZZZ"])
+        assert source.get_tickers() == ["AAPL"]
+        await source.add_ticker("NOPE")
+        assert "NOPE" not in source.get_tickers()
+        assert cache.get("NOPE") is None
+        await source.add_ticker("pypl")
+        assert "PYPL" in source.get_tickers()
+        await source.stop()
+
+    async def test_session_open_is_seed_price(self):
+        cache = PriceCache()
+        source = SimulatorDataSource(price_cache=cache, update_interval=0.02)
+        await source.start(["AAPL"])
+        await asyncio.sleep(0.1)
+        assert cache.get("AAPL").session_open == SEED_PRICES["AAPL"]
         await source.stop()

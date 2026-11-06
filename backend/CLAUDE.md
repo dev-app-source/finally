@@ -17,17 +17,17 @@ from app.market import PriceCache, PriceUpdate, MarketDataSource, create_market_
 
 ### Core Types
 
-- **`PriceUpdate`** — Immutable dataclass: `ticker`, `price`, `previous_price`, `timestamp`, plus properties `change`, `change_percent`, `direction` ("up"/"down"/"flat"), and `to_dict()` for JSON serialization.
+- **`PriceUpdate`** — Immutable dataclass: `ticker`, `price`, `previous_price`, `timestamp`, `session_open`, plus properties `change`, `change_percent`, `daily_change_percent` (vs `session_open`), `direction` ("up"/"down"/"flat"), and `to_dict()` for JSON serialization.
 
 - **`PriceCache`** — Thread-safe in-memory store. Key methods:
-  - `update(ticker, price, timestamp=None) -> PriceUpdate`
+  - `update(ticker, price, timestamp=None, session_open=None) -> PriceUpdate` (`session_open` defaults to the first price seen; an explicit value overrides)
   - `get(ticker) -> PriceUpdate | None`
   - `get_price(ticker) -> float | None`
   - `get_all() -> dict[str, PriceUpdate]`
   - `remove(ticker)`
   - `version` property — monotonic counter, increments on every update (for SSE change detection)
 
-- **`MarketDataSource`** — Abstract interface implemented by `SimulatorDataSource` and `MassiveDataSource`. Lifecycle: `start(tickers)` -> `add_ticker()` / `remove_ticker()` -> `stop()`.
+- **`MarketDataSource`** — Abstract interface implemented by `SimulatorDataSource` and `MassiveDataSource`. Lifecycle: `start(tickers)` -> `add_ticker()` / `remove_ticker()` -> `stop()`. `is_supported(ticker) -> bool` is the single place ticker validation lives (simulator: fixed 50-ticker universe; Massive: `^[A-Z][A-Z.]{0,9}$`). Massive sets `session_open` from the snapshot's previous-day close.
 
 - **`create_market_data_source(cache)`** — Factory. Returns `MassiveDataSource` if `MASSIVE_API_KEY` is set, otherwise `SimulatorDataSource`.
 
@@ -42,7 +42,7 @@ router = create_stream_router(price_cache)  # Returns FastAPI APIRouter
 
 ### Seed Data
 
-Default tickers: AAPL, GOOGL, MSFT, AMZN, TSLA, NVDA, META, JPM, V, NFLX. Seed prices and per-ticker volatility/drift params are in `app/market/seed_prices.py`.
+Default tickers: AAPL, GOOGL, MSFT, AMZN, TSLA, NVDA, META, JPM, V, NFLX. The simulator supports a fixed universe of 50 tickers (`SUPPORTED_TICKERS`); unknown tickers are rejected (`GBMSimulator` raises `ValueError`, `SimulatorDataSource` ignores them). Seed prices, per-ticker volatility/drift params and sector correlation groups are in `app/market/seed_prices.py`.
 
 ## Running Tests
 

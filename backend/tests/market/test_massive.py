@@ -199,3 +199,65 @@ class TestMassiveDataSource:
         assert cache.get_price("AAPL") == 190.50
 
         await source.stop()
+
+
+class TestMassiveSupportAndSessionOpen:
+    @pytest.mark.parametrize("ticker", ["AAPL", "V", "BRK.B", " aapl ", "ABCDEFGHIJ"])
+    def test_is_supported_valid(self, ticker):
+        source = MassiveDataSource(api_key="k", price_cache=PriceCache())
+        assert source.is_supported(ticker)
+
+    @pytest.mark.parametrize("ticker", ["", "1ABC", ".A", "AB-C", "ABCDEFGHIJK", "A B"])
+    def test_is_supported_invalid(self, ticker):
+        source = MassiveDataSource(api_key="k", price_cache=PriceCache())
+        assert not source.is_supported(ticker)
+
+    @pytest.mark.asyncio
+    async def test_session_open_from_prev_day_close(self):
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="k", price_cache=cache, poll_interval=60.0)
+        source._tickers = ["AAPL"]
+        source._client = MagicMock()
+        snap = _make_snapshot("AAPL", 110.0, 1707580800000)
+        snap.prev_day = MagicMock()
+        snap.prev_day.close = 100.0
+
+        with patch.object(source, "_fetch_snapshots", return_value=[snap]):
+            await source._poll_once()
+
+        update = cache.get("AAPL")
+        assert update.session_open == 100.0
+        assert update.daily_change_percent == 10.0
+
+    @pytest.mark.asyncio
+    async def test_session_open_falls_back_to_first_price(self):
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="k", price_cache=cache, poll_interval=60.0)
+        source._tickers = ["AAPL"]
+        source._client = MagicMock()
+        snap = _make_snapshot("AAPL", 110.0, 1707580800000)
+        snap.prev_day = None
+
+        with patch.object(source, "_fetch_snapshots", return_value=[snap]):
+            await source._poll_once()
+        snap2 = _make_snapshot("AAPL", 121.0, 1707580801000)
+        snap2.prev_day = None
+        with patch.object(source, "_fetch_snapshots", return_value=[snap2]):
+            await source._poll_once()
+
+        update = cache.get("AAPL")
+        assert update.session_open == 110.0
+        assert update.daily_change_percent == 10.0
+
+    @pytest.mark.asyncio
+    async def test_non_numeric_prev_close_ignored(self):
+        """A mock/garbage prevDay.c must not be used as session_open."""
+        cache = PriceCache()
+        source = MassiveDataSource(api_key="k", price_cache=cache, poll_interval=60.0)
+        source._tickers = ["AAPL"]
+        source._client = MagicMock()
+        snap = _make_snapshot("AAPL", 110.0, 1707580800000)  # prev_day is a MagicMock
+
+        with patch.object(source, "_fetch_snapshots", return_value=[snap]):
+            await source._poll_once()
+        assert cache.get("AAPL").session_open == 110.0

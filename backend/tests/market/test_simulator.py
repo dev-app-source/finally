@@ -1,6 +1,13 @@
 """Tests for GBMSimulator."""
 
-from app.market.seed_prices import SEED_PRICES
+import pytest
+
+from app.market.seed_prices import (
+    CORRELATION_GROUPS,
+    SEED_PRICES,
+    SUPPORTED_TICKERS,
+    TICKER_PARAMS,
+)
 from app.market.simulator import GBMSimulator
 
 
@@ -52,12 +59,36 @@ class TestGBMSimulator:
         sim = GBMSimulator(tickers=["AAPL"])
         sim.remove_ticker("NOPE")  # Should not raise
 
-    def test_unknown_ticker_gets_random_seed_price(self):
-        """Test that unknown tickers get random seed prices."""
-        sim = GBMSimulator(tickers=["ZZZZ"])
-        price = sim.get_price("ZZZZ")
-        assert price is not None
-        assert 50.0 <= price <= 300.0
+    def test_unknown_ticker_is_rejected(self):
+        """Tickers outside the fixed universe raise instead of getting a random price."""
+        with pytest.raises(ValueError):
+            GBMSimulator(tickers=["ZZZZ"])
+        sim = GBMSimulator(tickers=["AAPL"])
+        with pytest.raises(ValueError):
+            sim.add_ticker("APPL")
+
+    def test_universe_has_50_tickers_with_params(self):
+        assert len(SUPPORTED_TICKERS) == 50
+        assert set(TICKER_PARAMS) == set(SUPPORTED_TICKERS)
+        assert all(p > 0 for p in SEED_PRICES.values())
+
+    def test_every_ticker_in_exactly_one_correlation_group(self):
+        grouped = [t for g in CORRELATION_GROUPS.values() for t in g]
+        assert len(grouped) == len(set(grouped))
+        assert set(grouped) | {"TSLA"} == set(SUPPORTED_TICKERS)
+
+    def test_full_universe_steps(self):
+        """Cholesky must succeed (matrix positive definite) for all 50 tickers."""
+        sim = GBMSimulator(tickers=sorted(SUPPORTED_TICKERS))
+        result = sim.step()
+        assert len(result) == 50
+        assert all(p > 0 for p in result.values())
+
+    def test_pairwise_correlation_other_sectors(self):
+        assert GBMSimulator._pairwise_correlation("KO", "PEP") == 0.5
+        assert GBMSimulator._pairwise_correlation("XOM", "CVX") == 0.5
+        assert GBMSimulator._pairwise_correlation("JNJ", "PFE") == 0.5
+        assert GBMSimulator._pairwise_correlation("KO", "XOM") == 0.3
 
     def test_empty_step(self):
         """Test stepping with no tickers."""

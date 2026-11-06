@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from massive import RESTClient
 from massive.rest.models import SnapshotMarketType
@@ -12,6 +13,9 @@ from .cache import PriceCache
 from .interface import MarketDataSource
 
 logger = logging.getLogger(__name__)
+
+# Valid Massive ticker format (validated by shape only; Massive may still have no data)
+_TICKER_RE = re.compile(r"^[A-Z][A-Z.]{0,9}$")
 
 
 class MassiveDataSource(MarketDataSource):
@@ -78,7 +82,19 @@ class MassiveDataSource(MarketDataSource):
     def get_tickers(self) -> list[str]:
         return list(self._tickers)
 
+    def is_supported(self, ticker: str) -> bool:
+        return bool(_TICKER_RE.match(ticker.strip().upper()))
+
     # --- Internal ---
+
+    @staticmethod
+    def _prev_close(snap) -> float | None:
+        """Previous day's close from a snapshot, or None if missing/invalid."""
+        prev_day = getattr(snap, "prev_day", None)
+        close = getattr(prev_day, "close", None)
+        if isinstance(close, bool) or not isinstance(close, (int, float)) or close <= 0:
+            return None
+        return float(close)
 
     async def _poll_loop(self) -> None:
         """Poll on interval. First poll already happened in start()."""
@@ -101,10 +117,13 @@ class MassiveDataSource(MarketDataSource):
                     price = snap.last_trade.price
                     # Massive timestamps are Unix milliseconds → convert to seconds
                     timestamp = snap.last_trade.timestamp / 1000.0
+                    # session_open = previous day's close (prevDay.c); if absent the
+                    # cache falls back to the first polled price.
                     self._cache.update(
                         ticker=snap.ticker,
                         price=price,
                         timestamp=timestamp,
+                        session_open=self._prev_close(snap),
                     )
                     processed += 1
                 except (AttributeError, TypeError) as e:
