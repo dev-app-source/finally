@@ -55,3 +55,11 @@ class MarketDataSource(ABC):
     @abstractmethod
     def get_tickers(self) -> list[str]:
         """Return the current list of actively tracked tickers."""
+
+    @abstractmethod
+    def is_supported(self, ticker: str) -> bool:
+        """Return True if this source can provide prices for the ticker.
+
+        The ticker is normalized (trimmed, uppercased) before checking. This is
+        the single place ticker validation lives.
+        """

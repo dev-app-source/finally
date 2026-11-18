@@ -101,3 +101,36 @@ class TestPriceCache:
         cache = PriceCache()
         update = cache.update("AAPL", 190.12345)
         assert update.price == 190.12
+
+
+class TestSessionOpen:
+    def test_first_price_becomes_session_open(self):
+        cache = PriceCache()
+        update = cache.update("AAPL", 190.00)
+        assert update.session_open == 190.00
+        assert update.daily_change_percent == 0.0
+
+    def test_session_open_is_sticky(self):
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        update = cache.update("AAPL", 209.00)
+        assert update.session_open == 190.00
+        assert update.daily_change_percent == 10.0
+
+    def test_explicit_session_open_wins(self):
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        update = cache.update("AAPL", 190.00, session_open=180.00)
+        assert update.session_open == 180.00
+
+    def test_explicit_session_open_on_first_update(self):
+        cache = PriceCache()
+        update = cache.update("AAPL", 110.00, session_open=100.00)
+        assert update.daily_change_percent == 10.0
+
+    def test_session_open_reset_after_remove(self):
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        cache.remove("AAPL")
+        update = cache.update("AAPL", 200.00)
+        assert update.session_open == 200.00

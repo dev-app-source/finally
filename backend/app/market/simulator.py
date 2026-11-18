@@ -16,8 +16,10 @@ from .seed_prices import (
     CROSS_GROUP_CORR,
     DEFAULT_PARAMS,
     INTRA_FINANCE_CORR,
+    INTRA_OTHER_CORR,
     INTRA_TECH_CORR,
     SEED_PRICES,
+    SUPPORTED_TICKERS,
     TICKER_PARAMS,
     TSLA_CORR,
 )
@@ -147,9 +149,11 @@ class GBMSimulator:
         """Add a ticker without rebuilding Cholesky (for batch initialization)."""
         if ticker in self._prices:
             return
+        if ticker not in SEED_PRICES:
+            raise ValueError(f"Unsupported ticker for simulator: {ticker}")
         self._tickers.append(ticker)
-        self._prices[ticker] = SEED_PRICES.get(ticker, random.uniform(50.0, 300.0))
-        self._params[ticker] = TICKER_PARAMS.get(ticker, dict(DEFAULT_PARAMS))
+        self._prices[ticker] = SEED_PRICES[ticker]
+        self._params[ticker] = dict(TICKER_PARAMS.get(ticker, DEFAULT_PARAMS))
 
     def _rebuild_cholesky(self) -> None:
         """Rebuild the Cholesky decomposition of the ticker correlation matrix.
@@ -182,17 +186,17 @@ class GBMSimulator:
           - Cross-sector:       0.3
           - Unknown tickers:    0.3
         """
-        tech = CORRELATION_GROUPS["tech"]
-        finance = CORRELATION_GROUPS["finance"]
-
-        # TSLA is in tech set but behaves independently
+        # TSLA behaves independently of everything
         if t1 == "TSLA" or t2 == "TSLA":
             return TSLA_CORR
 
-        if t1 in tech and t2 in tech:
-            return INTRA_TECH_CORR
-        if t1 in finance and t2 in finance:
-            return INTRA_FINANCE_CORR
+        for group, members in CORRELATION_GROUPS.items():
+            if t1 in members and t2 in members:
+                if group == "tech":
+                    return INTRA_TECH_CORR
+                if group == "finance":
+                    return INTRA_FINANCE_CORR
+                return INTRA_OTHER_CORR
 
         return CROSS_GROUP_CORR
 
@@ -216,18 +220,29 @@ class SimulatorDataSource(MarketDataSource):
         self._sim: GBMSimulator | None = None
         self._task: asyncio.Task | None = None
 
+    def is_supported(self, ticker: str) -> bool:
+        return ticker.strip().upper() in SUPPORTED_TICKERS
+
     async def start(self, tickers: list[str]) -> None:
+        normalized = []
+        for t in tickers:
+            t = t.strip().upper()
+            if t in SUPPORTED_TICKERS:
+                if t not in normalized:
+                    normalized.append(t)
+            else:
+                logger.warning("Simulator: ignoring unsupported ticker %s", t)
         self._sim = GBMSimulator(
-            tickers=tickers,
+            tickers=normalized,
             event_probability=self._event_prob,
         )
         # Seed the cache with initial prices so SSE has data immediately
-        for ticker in tickers:
+        for ticker in normalized:
             price = self._sim.get_price(ticker)
             if price is not None:
                 self._cache.update(ticker=ticker, price=price)
         self._task = asyncio.create_task(self._run_loop(), name="simulator-loop")
-        logger.info("Simulator started with %d tickers", len(tickers))
+        logger.info("Simulator started with %d tickers", len(normalized))
 
     async def stop(self) -> None:
         if self._task and not self._task.done():
@@ -240,6 +255,10 @@ class SimulatorDataSource(MarketDataSource):
         logger.info("Simulator stopped")
 
     async def add_ticker(self, ticker: str) -> None:
+        ticker = ticker.strip().upper()
+        if ticker not in SUPPORTED_TICKERS:
+            logger.warning("Simulator: ignoring unsupported ticker %s", ticker)
+            return
         if self._sim:
             self._sim.add_ticker(ticker)
             # Seed cache immediately so the ticker has a price right away
@@ -249,6 +268,7 @@ class SimulatorDataSource(MarketDataSource):
             logger.info("Simulator: added ticker %s", ticker)
 
     async def remove_ticker(self, ticker: str) -> None:
+        ticker = ticker.strip().upper()
         if self._sim:
             self._sim.remove_ticker(ticker)
         self._cache.remove(ticker)
